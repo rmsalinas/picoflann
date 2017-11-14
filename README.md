@@ -3,7 +3,7 @@ Picoflann is minimal library for Exact KdTree Search. It is an step forward [nan
 
 ## Computing times
 
-Speed comparison with nanoflann on a data set of 10000 2d points:
+Speed comparison with nanoflann on a data set of 10000 2D points:
 
 ```
 Time in milliseconds of a total of 10000 Repetitions.
