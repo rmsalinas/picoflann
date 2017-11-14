@@ -1,5 +1,5 @@
 # picoflann
-picoflann is minimal library for Exact KdTree Search. It is an step forward [nanoflann](https://github.com/jlblancoc/nanoflann) but faster and easier to use.
+Picoflann is minimal library for Exact KdTree Search. It is an step forward [nanoflann](https://github.com/jlblancoc/nanoflann) but faster and easier to use.
 
 ## Computing times
 
