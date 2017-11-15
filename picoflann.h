@@ -49,25 +49,25 @@ void example1(){
         data.push_back( Point2f ( distribution(generator),distribution(generator)));
     ///------------------------------------------------------------
     /// Create the kdtree
-    picoflann::KdTreeIndex<2>  kdtree;
-    kdtree.build(data,PicoFlann_Point2fAdapter());//2 is the number of dimensions
+    picoflann::KdTreeIndex<2,PicoFlann_Point2fAdapter>  kdtree;//2 is the number of dimensions
+    kdtree.build(data);
     //search 10 nearest neibors to point (0,0)
-    std::vector<std::pair<uint32_t,double> > res=kdtree.searchKnn(data,PicoFlann_Point2fAdapter(),Point2f(0,0),10);
+    std::vector<std::pair<uint32_t,double> > res=kdtree.searchKnn(data,Point2f(0,0),10);
 
     //radius search in a radius of 30 (the resulting distances are squared)
-    res=kdtree.radiusSearch(data,PicoFlann_Point2fAdapter(),Point2f(0,0),30);
+    res=kdtree.radiusSearch(data,Point2f(0,0),30);
     //another version
-    kdtree.radiusSearch(data,PicoFlann_Point2fAdapter(),res,Point2f(0,0),30);
+    kdtree.radiusSearch(data,res,Point2f(0,0),30);
 
     //you can save to a file
     std::ofstream file_out("out.bin",std::ios::binary);
     kdtree.toStream(file_out);
 
     //recover from the file
-    picoflann::KdTreeIndex<2>  kdtree2;
+    picoflann::KdTreeIndex<2,PicoFlann_Point2fAdapter>  kdtree2;
     std::ifstream file_in("out.bin",std::ios::binary);
     kdtree2.fromStream(file_in);
-    res=kdtree2.radiusSearch(data,PicoFlann_Point2fAdapter(),Point2f(0,0),30);
+    res=kdtree2.radiusSearch(data,Point2f(0,0),30);
 
 }
 
@@ -79,14 +79,15 @@ void example2(){
         Point3f(float X,float Y,float Z) { data[0]=X;data[1]=Y;data[2]=Z; }
         float data[3];
     };
-
-    struct PicoFlann_Array3f_ContainerAdapter{
+    struct PicoFlann_Array3f_Adapter{
+        inline   float operator( )(const Point3f &elem, int dim)const{ return elem.data[dim]; }
+    };
+    struct PicoFlann_Array3f_Container{
         const Point3f *_array;
         size_t _size;
-        PicoFlann_Array3f_ContainerAdapter(float *array,size_t Size):_array((Point3f*)array),_size(Size){}
+        PicoFlann_Array3f_Container(float *array,size_t Size):_array((Point3f*)array),_size(Size){}
         inline size_t size()const{return _size;}
         inline const Point3f &at(int idx)const{ return _array [idx];}
-        inline   float operator( )(const Point3f &elem, int dim)const{ return elem.data[dim]; }
     };
     std::default_random_engine generator;
     std::uniform_real_distribution<double> distribution(-1000.0,1000.0);
@@ -97,10 +98,11 @@ void example2(){
         array[i]= distribution(generator);
 
     ///------------------------------------------------------------
-    picoflann::KdTreeIndex<3> kdtree;// 3 is the number of dimensions, L2 is the type of distance
-    kdtree.build( PicoFlann_Array3f_ContainerAdapter(array,nPoints));
-    std::vector<std::pair<uint32_t,double> > res=kdtree.searchKnn(PicoFlann_Array3f_ContainerAdapter(array,nPoints),Point3f(0,0,0),10);
-    res=kdtree.radiusSearch(PicoFlann_Array3f_ContainerAdapter(array,nPoints),Point3f(0,0,0),30);
+    picoflann::KdTreeIndex<3,PicoFlann_Array3f_Adapter> kdtree;// 3 is the number of dimensions, L2 is the type of distance
+    kdtree.build( PicoFlann_Array3f_Container(array,nPoints));
+    PicoFlann_Array3f_Container p3container(array,nPoints);
+    std::vector<std::pair<uint32_t,double> > res=kdtree.searchKnn(p3container,Point3f(0,0,0),10);
+    res=kdtree.radiusSearch(p3container,Point3f(0,0,0),30);
 }
 
  *
@@ -108,7 +110,7 @@ void example2(){
 struct L2{
 
     template<typename ElementType,typename Adapter>
-    double compute_distance( const ElementType &elema,const ElementType &elemb,const Adapter &adapter,int ndims ,double worstDist)
+    double compute_distance( const ElementType &elema,const ElementType &elemb,const Adapter & adapter,int ndims ,double worstDist)
     {
          //compute dist
         double sqd=0;
@@ -121,16 +123,15 @@ struct L2{
     }
 };
 
-template<int DIMS,typename DistanceType=L2 >
+template<int DIMS,typename Adapter,typename DistanceType=L2 >
 class KdTreeIndex{
-
 
 public:
     /**
      *Builds the index using the data  passes in your container and the adapter
      */
-    template<typename Container,typename Adapter=Container >
-    inline void build(const Container &container,const Adapter &adapter){
+    template<typename Container  >
+    inline void build(const Container &container ){
         _index.clear();
         _index.reserve(container.size()*2);
         _index.dims=DIMS;
@@ -138,15 +139,11 @@ public:
         //Create root and assign all items
         all_indices.resize(container.size());
         for(size_t i=0;i<container.size();i++)  all_indices[i]=i;
-        computeBoundingBox<Container,Adapter>(_index.rootBBox,0,all_indices.size(),container,adapter);
+        computeBoundingBox<Container>(_index.rootBBox,0,all_indices.size(),container);
         _index.push_back(Node());
-        divideTree<Container,Adapter>(_index,0,0,all_indices.size(),_index.rootBBox ,container,adapter);
+        divideTree<Container>(_index,0,0,all_indices.size(),_index.rootBBox ,container);
     }
 
-    template<typename ContainerAdapter>
-    inline void build(const ContainerAdapter &container_adapter){
-        return build<ContainerAdapter,ContainerAdapter>(container_adapter,container_adapter);
-    }
 
 
     //saves to a stream. Note that the container is not saved!
@@ -154,36 +151,25 @@ public:
     //reads from an stream. Note that the container is not readed!
     inline void fromStream (std::istream &str);
 
-    template<  typename Type,typename Container,typename Adapter >
-    inline std::vector<std::pair<uint32_t,double> >  searchKnn(const Container &container,const Adapter &adapter,const Type &val,  int nn,bool sorted=true){
+    template<  typename Type,typename Container >
+    inline std::vector<std::pair<uint32_t,double> >  searchKnn(const Container &container,const Type &val,  int nn,bool sorted=true){
         std::vector<std::pair<uint32_t,double> > res;
-        generalSearch<Type,Container,Adapter>(res,container,adapter,val,-1,sorted,nn);
+        generalSearch<Type,Container>(res,container,val,-1,sorted,nn);
         return res;
     }
 
-    template<  typename Type,typename ContainerAdapter>
-    inline std::vector<std::pair<uint32_t,double> >  searchKnn(const ContainerAdapter &container_adapter,const Type &val,int nn ,bool sorted=true){
+
+    template<  typename Type,typename Container >
+    inline std::vector<std::pair<uint32_t,double> >  radiusSearch(const Container &container,const Type &val, double dist,bool sorted=true, int maxNN=-1){
         std::vector<std::pair<uint32_t,double> > res;
-        generalSearch< Type,ContainerAdapter,ContainerAdapter>(res,container_adapter,container_adapter,val,-1,sorted,nn);
-        return res;
-    }
-    template<  typename Type,typename Container,typename Adapter >
-    inline std::vector<std::pair<uint32_t,double> >  radiusSearch(const Container &container,const Adapter &adapter,const Type &val, double dist,bool sorted=true, int maxNN=-1){
-        std::vector<std::pair<uint32_t,double> > res;
-        generalSearch< Type,Container,Adapter>(res,container,adapter,val,dist,sorted,maxNN);
+        generalSearch< Type,Container>(res,container,val,dist,sorted,maxNN);
         return res;
     }
 
-    template<  typename Type,typename ContainerAdapter>
-    inline std::vector<std::pair<uint32_t,double> >  radiusSearch(const ContainerAdapter &container_adapter,const Type &val, double dist,bool sorted=true, int maxNN=-1){
-        std::vector<std::pair<uint32_t,double> > res;
-        generalSearch< Type,ContainerAdapter,ContainerAdapter>(res,container_adapter,container_adapter,val,dist,sorted,maxNN);
-        return res;
-    }
 
-    template< typename Type,typename Container,typename Adapter >
-    inline void  radiusSearch(const Container &container,const Adapter &adapter,std::vector<std::pair<uint32_t,double> > &res,const Type &val, double dist,bool sorted=true, int maxNN=-1){
-        generalSearch<Type,Container,Adapter>(res,container,adapter,val,dist,sorted,maxNN);
+    template< typename Type,typename Container >
+    inline void  radiusSearch(const Container &container,std::vector<std::pair<uint32_t,double> > &res,const Type &val, double dist,bool sorted=true, int maxNN=-1){
+        generalSearch<Type,Container>(res,container,val,dist,sorted,maxNN);
     }
 
 
@@ -214,6 +200,7 @@ private:
     };
     Index _index;
     DistanceType _distance;
+    Adapter adapter;
     //next are only used during build
     std::vector<uint32_t> all_indices;
     int _maxLeafSize=10 ;
@@ -221,8 +208,8 @@ private:
 
 
     //temporal used during creation of the tree
-    template< typename Container,typename Adapter >
-    void  divideTree(Index &index,uint64_t  nodeIdx,int startIndex,int endIndex ,BoundingBox &bbox,const Container&container,const Adapter &adapter){
+    template< typename Container >
+    void  divideTree(Index &index,uint64_t  nodeIdx,int startIndex,int endIndex ,BoundingBox &bbox,const Container&container){
        // std::cout<<"CREATE="<<startIndex<<"-"<<endIndex<<"|";toStream(std::cout,bbox);
         Node &currNode=index[nodeIdx];
         int count=endIndex-startIndex;
@@ -232,7 +219,7 @@ private:
             currNode.idx.resize(count);
             for(int i=0;i<count;i++)
                 currNode.idx[i]= all_indices[startIndex+i];
-            computeBoundingBox<Container,Adapter>(bbox,startIndex,endIndex,container,adapter);
+            computeBoundingBox<Container>(bbox,startIndex,endIndex,container);
           //  std::cout<<std::endl;
             return;
         }
@@ -248,7 +235,7 @@ private:
         ///SELECT THE COL (DIMENSION) ON WHICH PARTITION IS MADE
         if (0){
             BoundingBox _bbox;
-            computeBoundingBox<Container,Adapter>(_bbox,startIndex,endIndex,container,adapter);
+            computeBoundingBox<Container>(_bbox,startIndex,endIndex,container);
             //        //get the dimension with highest distnaces
             double max_spread=-1;
             currNode.col_index=0;
@@ -269,7 +256,7 @@ private:
             ///SELECT THE COL (DIMENSION) ON WHICH PARTITION IS MADE
             double var[DIMS],mean[DIMS];
             //compute the variance of the features to  select the highest one
-            mean_var_calculate<Container,Adapter>(startIndex,endIndex, var, mean,container,adapter);
+            mean_var_calculate<Container>(startIndex,endIndex, var, mean,container);
             currNode.col_index=0;
             //select element with highest variance
             for(int i=1;i<DIMS;i++)
@@ -289,7 +276,7 @@ private:
 
          //std::cout<<" CUT FEAT="<<currNode.col_index<< " VAL="<<currNode.div_val<<std::endl;
         int lim1,lim2;
-        planeSplit<Container,Adapter> ( &all_indices[startIndex],count,currNode.col_index,currNode.div_val,lim1,lim2,container,adapter);
+        planeSplit<Container> ( &all_indices[startIndex],count,currNode.col_index,currNode.div_val,lim1,lim2,container);
 
         int split_index;
 
@@ -317,11 +304,11 @@ private:
 
         BoundingBox left_bbox(bbox);
         left_bbox[currNode.col_index].second = currNode.div_val;
-        divideTree<Container,Adapter>( index,leftNode ,startIndex,startIndex+split_index,left_bbox,container,adapter);
+        divideTree<Container>( index,leftNode ,startIndex,startIndex+split_index,left_bbox,container);
         assert(left_bbox[currNode.col_index].second <=currNode.div_val);
         BoundingBox right_bbox(bbox);
         right_bbox[currNode.col_index].first = currNode.div_val;
-        divideTree<Container,Adapter>(index,rightNode,startIndex+split_index,endIndex,right_bbox,container,adapter);
+        divideTree<Container>(index,rightNode,startIndex+split_index,endIndex,right_bbox,container);
 
         currNode.divlow = left_bbox[currNode.col_index].second;
         currNode.divhigh = right_bbox[currNode.col_index].first;
@@ -336,8 +323,8 @@ private:
 
 
 
-    template<  typename Container,typename Adapter >
-    void  computeBoundingBox (BoundingBox& bbox, int start,int end,const Container&container,const Adapter &adapter){
+    template<  typename Container >
+    void  computeBoundingBox (BoundingBox& bbox, int start,int end,const Container&container ){
         bbox.resize(DIMS);
         for (int i=0; i<DIMS; ++i)
             bbox[i].second = bbox[i].first = adapter( container.at(  all_indices[start]),i);
@@ -351,8 +338,8 @@ private:
         }
     }
 
-    template<  typename Container,typename Adapter >
-    void  mean_var_calculate(  int startindex, int endIndex, double var[], double mean[],const Container&container,const Adapter &adapter){
+    template<  typename Container >
+    void  mean_var_calculate(  int startindex, int endIndex, double var[], double mean[],const Container&container){
         const int MAX_ELEM_MEAN=100;
         //recompute centers
         //compute new center
@@ -390,8 +377,8 @@ private:
      *  dataset[ind[lim1..lim2-1]][cutfeat]==cutval
      *  dataset[ind[lim2..count]][cutfeat]>cutval
      */
-    template<  typename Container,typename Adapter >
-    void  planeSplit(uint32_t* ind, int count, int cutfeat, float cutval, int& lim1, int& lim2,const Container&container,const Adapter &adapter){
+    template<  typename Container >
+    void  planeSplit(uint32_t* ind, int count, int cutfeat, float cutval, int& lim1, int& lim2,const Container&container){
         /* Move vector indices for left subtree to front of list. */
         int left = 0;
         int right = count-1;
@@ -413,8 +400,8 @@ private:
     }
 
 
-    template< typename Type,typename Adapter >
-    inline  double computeInitialDistances(const Type &elem, double dists[ ],const BoundingBox &bbox,const Adapter &adapter) const{
+    template< typename Type >
+    inline  double computeInitialDistances(const Type &elem, double dists[ ],const BoundingBox &bbox) const{
         float distsq = 0.0;
 
         for (int i = 0; i <DIMS; ++i) {
@@ -433,14 +420,14 @@ private:
         return distsq;
     }
     //THe function that does the search in all exact methods
-    template< typename Type,typename Container,typename Adapter>
-    inline void generalSearch( std::vector<std::pair<uint32_t,double> > &res, const Container&container,const Adapter &adapter,const Type &val,double dist,bool sorted=true,uint32_t maxNn=std::numeric_limits<int>::max() ){
+    template< typename Type,typename Container>
+    inline void generalSearch( std::vector<std::pair<uint32_t,double> > &res, const Container&container,const Type &val,double dist,bool sorted=true,uint32_t maxNn=std::numeric_limits<int>::max() ){
          double  dists[DIMS];
         memset(dists ,0,sizeof(double)*DIMS);
         res.clear();
         ResultSet hres( res ,maxNn,dist>0?dist*dist:-1.f);
-        float distsq = computeInitialDistances<Type,Adapter>(val, dists,_index.rootBBox,adapter);
-        searchExactLevel<Type,Container,Adapter> (_index,0,val,hres,distsq,dists,1,container,adapter);
+        float distsq = computeInitialDistances<Type>(val, dists,_index.rootBBox);
+        searchExactLevel<Type,Container> (_index,0,val,hres,distsq,dists,1,container);
         if (sorted && res.size()>1)
             std::sort(res.begin(),res.end(),[](const std::pair<uint32_t,double>&a,const std::pair<uint32_t,double>&b){return a.second<b.second;});
      }
@@ -536,8 +523,8 @@ private:
         }
     };
 
-    template< typename Type,typename Container,typename Adapter >
-    inline  void searchExactLevel(Index &index,int64_t nodeIdx,const Type &elem, ResultSet  &res, double mindistsq, double  dists[ ],double epsError ,const Container &container,const Adapter &adapter){
+    template< typename Type,typename Container >
+    inline  void searchExactLevel(Index &index,int64_t nodeIdx,const Type &elem, ResultSet  &res, double mindistsq, double  dists[ ],double epsError ,const Container &container){
 
         Node &currNode=index[nodeIdx];
         if (currNode.isLeaf()){
@@ -570,20 +557,20 @@ private:
                 cut_dist =  diff1*diff1;
             }
             /* Call recursively to search next level down. */
-            searchExactLevel<Type,Container,Adapter> (index,bestChild,elem,res, mindistsq, dists ,epsError,container,adapter );
+            searchExactLevel<Type,Container> (index,bestChild,elem,res, mindistsq, dists ,epsError,container );
 
             float dst = dists[currNode.col_index];
             mindistsq = mindistsq + cut_dist - dst;
             dists[currNode.col_index] = cut_dist;
             if (mindistsq*epsError <=res.worstDist())
-                searchExactLevel<Type,Container,Adapter>   (index,otherChild,elem,res, mindistsq, dists,epsError,container,adapter );
+                searchExactLevel<Type,Container>   (index,otherChild,elem,res, mindistsq, dists,epsError,container );
             dists[currNode.col_index] = dst;
         }
     }
 
 };
-template<int DIMS,typename DistanceType>
-void KdTreeIndex<DIMS,DistanceType>::Node::toStream(std::ostream &str) const{
+template<int DIMS,typename AAdapter,typename DistanceType>
+void KdTreeIndex<DIMS,AAdapter,DistanceType>::Node::toStream(std::ostream &str) const{
     str.write((char*)&div_val,sizeof(div_val));
     str.write((char*)&col_index,sizeof(col_index));
     str.write((char*)&divhigh,sizeof(divhigh));
@@ -596,9 +583,8 @@ void KdTreeIndex<DIMS,DistanceType>::Node::toStream(std::ostream &str) const{
 
 }
 
-
-template<int DIMS,typename DistanceType>
-void KdTreeIndex<DIMS,DistanceType>::Node::fromStream(std::istream &str){
+template<int DIMS,typename AAdapter,typename DistanceType>
+void KdTreeIndex<DIMS,AAdapter,DistanceType>::Node::fromStream(std::istream &str){
     str.read((char*)&div_val,sizeof(div_val));
     str.read((char*)&col_index,sizeof(col_index));
     str.read((char*)&divhigh,sizeof(divhigh));
@@ -612,9 +598,8 @@ void KdTreeIndex<DIMS,DistanceType>::Node::fromStream(std::istream &str){
 
 }
 
-
-template<int DIMS,typename DistanceType>
-void KdTreeIndex<DIMS,DistanceType>::Index::toStream(std::ostream &str)const
+template<int DIMS,typename AAdapter,typename DistanceType>
+void KdTreeIndex<DIMS,AAdapter,DistanceType>::Index::toStream(std::ostream &str)const
 {
 
     str.write((char*)&dims,sizeof(dims));
@@ -626,9 +611,8 @@ void KdTreeIndex<DIMS,DistanceType>::Index::toStream(std::ostream &str)const
     for(size_t i=0;i<std::vector<Node>::size();i++) std::vector<Node>::at(i).toStream(str);
 }
 
-
-template<int DIMS,typename DistanceType>
-void KdTreeIndex<DIMS,DistanceType>::Index::fromStream(std::istream &str){
+template<int DIMS,typename AAdapter,typename DistanceType>
+void KdTreeIndex<DIMS,AAdapter,DistanceType>::Index::fromStream(std::istream &str){
     str.read((char*)&dims,sizeof(dims));
     rootBBox.resize(dims);
     str.read((char*)&rootBBox[0],sizeof(rootBBox[0])*dims);
@@ -643,15 +627,13 @@ void KdTreeIndex<DIMS,DistanceType>::Index::fromStream(std::istream &str){
 
 }
 
-
-template<int DIMS,typename DistanceType>
-void KdTreeIndex<DIMS,DistanceType>::toStream (std::ostream &str)const{
+template<int DIMS,typename AAdapter,typename DistanceType>
+void KdTreeIndex<DIMS,AAdapter,DistanceType>::toStream (std::ostream &str)const{
 _index.toStream(str);
 }
 
-
-template<int DIMS,typename DistanceType>
-void KdTreeIndex<DIMS,DistanceType>::fromStream(std::istream &str){
+template<int DIMS,typename AAdapter,typename DistanceType>
+void KdTreeIndex<DIMS,AAdapter,DistanceType>::fromStream(std::istream &str){
 _index.fromStream(str);
 if (_index.dims!=DIMS)throw std::runtime_error("Number of dimensions of the index in the stream is different from the number of dimensions of this");
 }
