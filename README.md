@@ -18,7 +18,7 @@ NanoFlann build= 2.16247 radiusSearch=4.1935
 ```
 # Example 
 ```
-    //Data type
+     //Data type
     struct Point2f{
         Point2f(float X,float Y) { x=X;y=Y; }
         float x,y;
@@ -38,24 +38,24 @@ NanoFlann build= 2.16247 radiusSearch=4.1935
         data.push_back( Point2f ( distribution(generator),distribution(generator)));
     ///------------------------------------------------------------
     /// Create the kdtree
-    picoflann::KdTreeIndex<2>  kdtree;
-    kdtree.build(data,PicoFlann_Point2fAdapter());//2 is the number of dimensions
+    picoflann::KdTreeIndex<2,PicoFlann_Point2fAdapter>  kdtree;//2 is the number of dimensions
+    kdtree.build(data);
     //search 10 nearest neibors to point (0,0)
-    std::vector<std::pair<uint32_t,double> > res=kdtree.searchKnn(data,PicoFlann_Point2fAdapter(),Point2f(0,0),10);
+    std::vector<std::pair<uint32_t,double> > res=kdtree.searchKnn(data,Point2f(0,0),10);
 
     //radius search in a radius of 30 (the resulting distances are squared)
-    res=kdtree.radiusSearch(data,PicoFlann_Point2fAdapter(),Point2f(0,0),30);
+    res=kdtree.radiusSearch(data,Point2f(0,0),30);
     //another version
-    kdtree.radiusSearch(data,PicoFlann_Point2fAdapter(),res,Point2f(0,0),30);
+    kdtree.radiusSearch(data,res,Point2f(0,0),30);
 
     //you can save to a file
     std::ofstream file_out("out.bin",std::ios::binary);
     kdtree.toStream(file_out);
 
     //recover from the file
-    picoflann::KdTreeIndex<2>  kdtree2;
+    picoflann::KdTreeIndex<2,PicoFlann_Point2fAdapter>  kdtree2;
     std::ifstream file_in("out.bin",std::ios::binary);
     kdtree2.fromStream(file_in);
-    res=kdtree2.radiusSearch(data,PicoFlann_Point2fAdapter(),Point2f(0,0),30);
+    res=kdtree2.radiusSearch(data,Point2f(0,0),30);
  ```
  
