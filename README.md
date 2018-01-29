@@ -3,18 +3,26 @@ Picoflann is minimal library for Exact KdTree Search. It is an step forward [nan
 
 ## Computing times
 
-Speed comparison with nanoflann on a data set of 10000 2D points:
+Speed comparison with nanoflann and OpenCv on a data set of 10000 2D points:
 
 ```
-Time in milliseconds of a total of 10000 Repetitions.
+Speed up in 3D points:
 
-Knn Search of 1000 elements
-PicoFlann build= 1.37571 KnnSearch=1755.25
-NanoFlann build= 2.01148 KnnSearch=7270.61
+Index building SpeedUp
+-------------------------------
+PicoFlann vs NanoFlann:     1.46x faster
+PicoFlann vs OpenCv Flann:  1.73x faster
 
-Radius search (we are a bit slower :S)
-PicoFlann build= 1.408 radiusSearch=5.27617
-NanoFlann build= 2.16247 radiusSearch=4.1935
+Knn SpeedUp
+-------------------------
+PicoFlann vs NanoFlann:     4.14x faster
+PicoFlann vs OpenCv Flann:  1.8x faster
+
+
+Radius Search 
+PicoFlann vs NanoFlann:        1.25x faster
+PicoFlann vs OpenCv Flann:     3.21x faster
+
 ```
 # Example 
 ```
