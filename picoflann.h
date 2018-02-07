@@ -7,6 +7,7 @@
 #include <limits>
 #include <algorithm>
 #include <cstring>
+#include <iomanip>      // std::setprecision
 namespace  picoflann {
 
 
@@ -304,7 +305,12 @@ private:
 
         BoundingBox left_bbox(bbox);
         left_bbox[currNode.col_index].second = currNode.div_val;
+        assert(left_bbox[currNode.col_index].second <=currNode.div_val);
         divideTree<Container>( index,leftNode ,startIndex,startIndex+split_index,left_bbox,container);
+
+         //this may happen because precision errors
+       left_bbox[currNode.col_index].second=currNode.div_val;
+
         assert(left_bbox[currNode.col_index].second <=currNode.div_val);
         BoundingBox right_bbox(bbox);
         right_bbox[currNode.col_index].first = currNode.div_val;
