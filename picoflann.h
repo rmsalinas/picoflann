@@ -7,7 +7,6 @@
 #include <limits>
 #include <algorithm>
 #include <cstring>
-#include <iomanip>      // std::setprecision
 namespace  picoflann {
 
 
@@ -28,7 +27,6 @@ namespace  picoflann {
 #include <vector>
 #include <fstream>
 #include "picoflann.h"
-//uses a vector of 2d points
 void example1(){
     //Data type
     struct Point2f{
@@ -58,7 +56,7 @@ void example1(){
     //radius search in a radius of 30 (the resulting distances are squared)
     res=kdtree.radiusSearch(data,Point2f(0,0),30);
     //another version
-    kdtree.radiusSearch(data,res,Point2f(0,0),30);
+    kdtree.radiusSearch(res,data,Point2f(0,0),30);
 
     //you can save to a file
     std::ofstream file_out("out.bin",std::ios::binary);
@@ -105,13 +103,12 @@ void example2(){
     std::vector<std::pair<uint32_t,double> > res=kdtree.searchKnn(p3container,Point3f(0,0,0),10);
     res=kdtree.radiusSearch(p3container,Point3f(0,0,0),30);
 }
-
  *
  */
 struct L2{
 
     template<typename ElementType,typename Adapter>
-    double compute_distance( const ElementType &elema,const ElementType &elemb,const Adapter & adapter,int ndims ,double worstDist)
+    double compute_distance( const ElementType &elema,const ElementType &elemb,const Adapter & adapter,int ndims ,double worstDist)const
     {
          //compute dist
         double sqd=0;
@@ -140,12 +137,17 @@ public:
         //Create root and assign all items
         all_indices.resize(container.size());
         for(size_t i=0;i<container.size();i++)  all_indices[i]=i;
+        if (container.size()==0) return;
         computeBoundingBox<Container>(_index.rootBBox,0,all_indices.size(),container);
         _index.push_back(Node());
         divideTree<Container>(_index,0,0,all_indices.size(),_index.rootBBox ,container);
     }
 
 
+    inline void clear(){
+        _index.clear();
+        all_indices.clear();
+    }
 
     //saves to a stream. Note that the container is not saved!
     inline void toStream (std::ostream &str)const;
@@ -161,7 +163,7 @@ public:
 
 
     template<  typename Type,typename Container >
-    inline std::vector<std::pair<uint32_t,double> >  radiusSearch(const Container &container,const Type &val, double dist,bool sorted=true, int maxNN=-1){
+    inline std::vector<std::pair<uint32_t,double> >  radiusSearch(const Container &container,const Type &val, double dist,bool sorted=true, int maxNN=-1)const{
         std::vector<std::pair<uint32_t,double> > res;
         generalSearch< Type,Container>(res,container,val,dist,sorted,maxNN);
         return res;
@@ -169,7 +171,7 @@ public:
 
 
     template< typename Type,typename Container >
-    inline void  radiusSearch(const Container &container,std::vector<std::pair<uint32_t,double> > &res,const Type &val, double dist,bool sorted=true, int maxNN=-1){
+    inline void  radiusSearch(std::vector<std::pair<uint32_t,double> > &res,const Container &container,const Type &val, double dist,bool sorted=true, int maxNN=-1){
         generalSearch<Type,Container>(res,container,val,dist,sorted,maxNN);
     }
 
@@ -194,7 +196,7 @@ private:
 
     struct Index:public  std::vector<Node>{
         BoundingBox rootBBox;
-        int dims=-1;
+        int dims=0;
         int nValues=0;//number of elements of the set when call to build
         inline void toStream(std::ostream &str)const;
         inline void fromStream(std::istream &str);
@@ -305,12 +307,8 @@ private:
 
         BoundingBox left_bbox(bbox);
         left_bbox[currNode.col_index].second = currNode.div_val;
-        assert(left_bbox[currNode.col_index].second <=currNode.div_val);
         divideTree<Container>( index,leftNode ,startIndex,startIndex+split_index,left_bbox,container);
-
-         //this may happen because precision errors
-       left_bbox[currNode.col_index].second=currNode.div_val;
-
+        left_bbox[currNode.col_index].second = currNode.div_val;
         assert(left_bbox[currNode.col_index].second <=currNode.div_val);
         BoundingBox right_bbox(bbox);
         right_bbox[currNode.col_index].first = currNode.div_val;
@@ -427,7 +425,7 @@ private:
     }
     //THe function that does the search in all exact methods
     template< typename Type,typename Container>
-    inline void generalSearch( std::vector<std::pair<uint32_t,double> > &res, const Container&container,const Type &val,double dist,bool sorted=true,uint32_t maxNn=std::numeric_limits<int>::max() ){
+    inline void generalSearch( std::vector<std::pair<uint32_t,double> > &res, const Container&container,const Type &val,double dist,bool sorted=true,uint32_t maxNn=std::numeric_limits<int>::max() )const{
          double  dists[DIMS];
         memset(dists ,0,sizeof(double)*DIMS);
         res.clear();
@@ -530,9 +528,9 @@ private:
     };
 
     template< typename Type,typename Container >
-    inline  void searchExactLevel(Index &index,int64_t nodeIdx,const Type &elem, ResultSet  &res, double mindistsq, double  dists[ ],double epsError ,const Container &container){
+    inline  void searchExactLevel(const Index &index,int64_t nodeIdx,const Type &elem, ResultSet  &res, double mindistsq, double  dists[ ],double epsError ,const Container &container)const{
 
-        Node &currNode=index[nodeIdx];
+        const Node &currNode=index[nodeIdx];
         if (currNode.isLeaf()){
             double worstDist=res.worstDist();
             for(size_t i=0;i<currNode.idx.size();i++){
@@ -629,7 +627,8 @@ void KdTreeIndex<DIMS,AAdapter,DistanceType>::Index::fromStream(std::istream &st
     str.read((char*)&s,sizeof(s));
     std::vector<Node>::resize(s);
     for(size_t i=0;i<std::vector<Node>::size();i++) std::vector<Node>::at(i).fromStream(str);
-    if (dims!=DIMS)throw std::runtime_error("Number of dimensions of the index in the stream is different from the number of dimensions of this");
+    if (dims!=DIMS && this->size()!=0 && nValues!=0)
+        throw std::runtime_error("Number of dimensions of the index in the stream is different from the number of dimensions of this");
 
 }
 
@@ -641,7 +640,6 @@ _index.toStream(str);
 template<int DIMS,typename AAdapter,typename DistanceType>
 void KdTreeIndex<DIMS,AAdapter,DistanceType>::fromStream(std::istream &str){
 _index.fromStream(str);
-if (_index.dims!=DIMS)throw std::runtime_error("Number of dimensions of the index in the stream is different from the number of dimensions of this");
 }
 }
 
