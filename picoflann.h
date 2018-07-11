@@ -7,6 +7,7 @@
 #include <limits>
 #include <algorithm>
 #include <cstring>
+#include <iostream>
 namespace  picoflann {
 
 
@@ -177,6 +178,8 @@ public:
 
 
 
+    //computes a hash number from the index
+    uint64_t getHash()const;
 private:
 
     struct Node{
@@ -195,13 +198,17 @@ private:
     typedef std::vector<std::pair<double,double> > BoundingBox;
 
     struct Index:public  std::vector<Node>{
+        Index(int Dims){
+            dims=Dims;
+            rootBBox.resize(dims);
+        }
         BoundingBox rootBBox;
         int dims=0;
         int nValues=0;//number of elements of the set when call to build
         inline void toStream(std::ostream &str)const;
         inline void fromStream(std::istream &str);
     };
-    Index _index;
+    Index _index=Index(DIMS);
     DistanceType _distance;
     Adapter adapter;
     //next are only used during build
@@ -309,7 +316,7 @@ private:
         left_bbox[currNode.col_index].second = currNode.div_val;
         divideTree<Container>( index,leftNode ,startIndex,startIndex+split_index,left_bbox,container);
         left_bbox[currNode.col_index].second = currNode.div_val;
-        assert(left_bbox[currNode.col_index].second <=currNode.div_val);
+        //assert(left_bbox[currNode.col_index].second <=currNode.div_val);
         BoundingBox right_bbox(bbox);
         right_bbox[currNode.col_index].first = currNode.div_val;
         divideTree<Container>(index,rightNode,startIndex+split_index,endIndex,right_bbox,container);
@@ -607,10 +614,14 @@ void KdTreeIndex<DIMS,AAdapter,DistanceType>::Index::toStream(std::ostream &str)
 {
 
     str.write((char*)&dims,sizeof(dims));
-    str.write((char*)&rootBBox[0],sizeof(rootBBox[0])*dims);
     str.write((char*)&nValues,sizeof(nValues));
 
-    uint64_t s=std::vector<Node>::size();
+
+    uint64_t s=rootBBox.size();
+    str.write((char*)&s,sizeof(s));
+    str.write((char*)&rootBBox[0],sizeof(rootBBox[0])*rootBBox.size());
+
+    s=std::vector<Node>::size();
     str.write((char*)&s,sizeof(s));
     for(size_t i=0;i<std::vector<Node>::size();i++) std::vector<Node>::at(i).toStream(str);
 }
@@ -618,12 +629,15 @@ void KdTreeIndex<DIMS,AAdapter,DistanceType>::Index::toStream(std::ostream &str)
 template<int DIMS,typename AAdapter,typename DistanceType>
 void KdTreeIndex<DIMS,AAdapter,DistanceType>::Index::fromStream(std::istream &str){
     str.read((char*)&dims,sizeof(dims));
-    rootBBox.resize(dims);
-    str.read((char*)&rootBBox[0],sizeof(rootBBox[0])*dims);
     str.read((char*)&nValues,sizeof(nValues));
 
-
     uint64_t s;;
+
+    str.read((char*)&s,sizeof(s));
+    rootBBox.resize(s);
+    str.read((char*)&rootBBox[0],sizeof(rootBBox[0])*rootBBox.size());
+
+
     str.read((char*)&s,sizeof(s));
     std::vector<Node>::resize(s);
     for(size_t i=0;i<std::vector<Node>::size();i++) std::vector<Node>::at(i).fromStream(str);
@@ -641,6 +655,36 @@ template<int DIMS,typename AAdapter,typename DistanceType>
 void KdTreeIndex<DIMS,AAdapter,DistanceType>::fromStream(std::istream &str){
 _index.fromStream(str);
 }
+
+template<int DIMS,typename AAdapter,typename DistanceType>
+uint64_t KdTreeIndex<DIMS,AAdapter,DistanceType>:: getHash()const{
+
+    auto toUint64=[](double val){
+        uint64_t *ui=(uint64_t *)&val;
+        return *ui;
+    };
+    uint64_t seed=_index.dims;
+    seed  ^=  _index.nValues+ 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    for(size_t i=0;i<_index.rootBBox.size();i++){
+        seed  ^=  toUint64(_index.rootBBox[i].first) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        seed  ^=  toUint64(_index.rootBBox[i].second)+ 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    }
+    for(size_t i=0;i<_index.size();i++){
+        const auto &node=_index.at(i);
+        seed  ^=  toUint64(node.div_val)+ 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        seed  ^=  node.col_index+ 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        seed  ^=  toUint64(node.divhigh)+ 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        seed  ^=  toUint64(node.divlow)+ 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        seed  ^=  node._ileft+ 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        seed  ^=  node._iright+ 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        for(auto v:node.idx)
+            seed  ^=  v+ 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    }
+
+
+    return seed;
+}
+
 }
 
 #endif
