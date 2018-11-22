@@ -24,7 +24,7 @@ PicoFlann vs NanoFlann:        1.25x faster
 PicoFlann vs OpenCv Flann:     3.21x faster
 
 
-## Citing
+# Citing
 
 If you use this project in academic research you must cite us. This project is part of the ucoslam project. Visit ucoslam.com for more information
 about how to cite this project.
