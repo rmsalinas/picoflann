@@ -1,6 +1,7 @@
-# picoflann
+picoflann
+===================
 Picoflann is minimal library for Exact KdTree Search. It is an step forward [nanoflann](https://github.com/jlblancoc/nanoflann) but faster and easier to use.
-
+##
 ## Computing times
 
 Speed comparison with nanoflann and OpenCv on a data set of 10000 2D points:
@@ -24,12 +25,15 @@ PicoFlann vs NanoFlann:        1.25x faster
 PicoFlann vs OpenCv Flann:     3.21x faster
 
 
-# Citing
+
+```
+##
+## Citing
 
 If you use this project in academic research you must cite us. This project is part of the ucoslam project. Visit [ucoslam.com](ucoslam.com) for more information
 about how to cite this project.
 
-```
+##
 # Example 
 ```
      //Data type
