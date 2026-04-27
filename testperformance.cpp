@@ -9,9 +9,10 @@
 #include <opencv2/flann.hpp>
 
 #include "picoflann.h"
+#include "picoflann2.h"
 
 // ---------------------------------------------------------------------------
-// Point type and picoflann adapter
+// Shared point type and adapters (same for both libraries)
 // ---------------------------------------------------------------------------
 
 template<int DIMS>
@@ -59,7 +60,7 @@ cv::Mat points_to_mat(const std::vector<Point<DIMS>>& pts) {
 }
 
 // ---------------------------------------------------------------------------
-// Result structure
+// Result
 // ---------------------------------------------------------------------------
 
 struct BenchResult {
@@ -68,64 +69,95 @@ struct BenchResult {
 };
 
 // ---------------------------------------------------------------------------
-// picoflann benchmark (exact search)
+// picoflann v1 benchmark
 // ---------------------------------------------------------------------------
 
 template<int DIMS>
 BenchResult bench_picoflann(
     const std::vector<Point<DIMS>>& pts,
     const std::vector<Point<DIMS>>& queries,
-    int knn, int burn_runs, int measure_iters)
+    int knn, int burn, int iters)
 {
     using Tree = picoflann::KdTreeIndex<DIMS, PointAdapter<DIMS>>;
 
-    for (int b = 0; b < burn_runs; ++b) {
-        Tree tree;
-        tree.build(pts);
-        volatile size_t sink = 0;
-        for (const auto& q : queries) { auto r = tree.searchKnn(pts, q, knn); sink += r.size(); }
-        (void)sink;
+    for (int b = 0; b < burn; ++b) {
+        Tree tree; tree.build(pts);
+        volatile size_t s = 0;
+        for (const auto& q : queries) { auto r = tree.searchKnn(pts, q, knn); s += r.size(); }
+        (void)s;
     }
 
-    double total_build = 0.0;
-    for (int i = 0; i < measure_iters; ++i) {
-        Tree tree;
-        auto t0 = Clock::now();
-        tree.build(pts);
-        total_build += elapsed_ms(t0);
+    double tb = 0;
+    for (int i = 0; i < iters; ++i) {
+        Tree tree; auto t0 = Clock::now(); tree.build(pts); tb += elapsed_ms(t0);
     }
 
-    Tree tree;
-    tree.build(pts);
-
-    for (int b = 0; b < burn_runs; ++b) {
-        volatile size_t sink = 0;
-        for (const auto& q : queries) { auto r = tree.searchKnn(pts, q, knn); sink += r.size(); }
-        (void)sink;
+    Tree tree; tree.build(pts);
+    for (int b = 0; b < burn; ++b) {
+        volatile size_t s = 0;
+        for (const auto& q : queries) { auto r = tree.searchKnn(pts, q, knn); s += r.size(); }
+        (void)s;
     }
 
-    double total_search = 0.0;
-    for (int i = 0; i < measure_iters; ++i) {
-        volatile size_t sink = 0;
-        auto t0 = Clock::now();
-        for (const auto& q : queries) { auto r = tree.searchKnn(pts, q, knn); sink += r.size(); }
-        total_search += elapsed_ms(t0);
-        (void)sink;
+    double ts = 0;
+    for (int i = 0; i < iters; ++i) {
+        volatile size_t s = 0; auto t0 = Clock::now();
+        for (const auto& q : queries) { auto r = tree.searchKnn(pts, q, knn); s += r.size(); }
+        ts += elapsed_ms(t0); (void)s;
+    }
+    return { tb / iters, ts / iters };
+}
+
+// ---------------------------------------------------------------------------
+// picoflann v2 benchmark — Scalar is float or double
+// ---------------------------------------------------------------------------
+
+template<int DIMS, typename Scalar>
+BenchResult bench_picoflann2_scalar(
+    const std::vector<Point<DIMS>>& pts,
+    const std::vector<Point<DIMS>>& queries,
+    int knn, int burn, int iters)
+{
+    using Tree = picoflann2::KdTreeIndex<DIMS, PointAdapter<DIMS>, picoflann2::L2, Scalar>;
+
+    for (int b = 0; b < burn; ++b) {
+        Tree tree; tree.build(pts);
+        volatile size_t s = 0;
+        for (const auto& q : queries) { auto r = tree.searchKnn(pts, q, knn); s += r.size(); }
+        (void)s;
     }
 
-    return { total_build / measure_iters, total_search / measure_iters };
+    double tb = 0;
+    for (int i = 0; i < iters; ++i) {
+        Tree tree; auto t0 = Clock::now(); tree.build(pts); tb += elapsed_ms(t0);
+    }
+
+    Tree tree; tree.build(pts);
+    for (int b = 0; b < burn; ++b) {
+        volatile size_t s = 0;
+        for (const auto& q : queries) { auto r = tree.searchKnn(pts, q, knn); s += r.size(); }
+        (void)s;
+    }
+
+    double ts = 0;
+    for (int i = 0; i < iters; ++i) {
+        volatile size_t s = 0; auto t0 = Clock::now();
+        for (const auto& q : queries) { auto r = tree.searchKnn(pts, q, knn); s += r.size(); }
+        ts += elapsed_ms(t0); (void)s;
+    }
+    return { tb / iters, ts / iters };
 }
 
 // ---------------------------------------------------------------------------
 // OpenCV FLANN benchmark
-// checks=-1 means exact (FLANN_CHECKS_UNLIMITED), checks=32 means approximate
+// checks=-1 → exact (FLANN_CHECKS_UNLIMITED), checks=32 → approximate
 // ---------------------------------------------------------------------------
 
 template<int DIMS>
 BenchResult bench_opencv(
     const std::vector<Point<DIMS>>& pts,
     const std::vector<Point<DIMS>>& queries,
-    int knn, int burn_runs, int measure_iters, int checks)
+    int knn, int burn, int iters, int checks)
 {
     cv::Mat data  = points_to_mat<DIMS>(pts);
     cv::Mat qmat  = points_to_mat<DIMS>(queries);
@@ -133,100 +165,107 @@ BenchResult bench_opencv(
     cv::Mat dst_out(static_cast<int>(queries.size()), knn, CV_32F);
     cv::flann::SearchParams sp(checks);
 
-    for (int b = 0; b < burn_runs; ++b) {
+    for (int b = 0; b < burn; ++b) {
         cv::flann::Index fi(data, cv::flann::KDTreeIndexParams(1));
         fi.knnSearch(qmat, idx_out, dst_out, knn, sp);
     }
 
-    double total_build = 0.0;
-    for (int i = 0; i < measure_iters; ++i) {
+    double tb = 0;
+    for (int i = 0; i < iters; ++i) {
         auto t0 = Clock::now();
         cv::flann::Index fi(data, cv::flann::KDTreeIndexParams(1));
-        total_build += elapsed_ms(t0);
+        tb += elapsed_ms(t0);
     }
 
     cv::flann::Index fi(data, cv::flann::KDTreeIndexParams(1));
-
-    for (int b = 0; b < burn_runs; ++b)
+    for (int b = 0; b < burn; ++b)
         fi.knnSearch(qmat, idx_out, dst_out, knn, sp);
 
-    double total_search = 0.0;
-    for (int i = 0; i < measure_iters; ++i) {
+    double ts = 0;
+    for (int i = 0; i < iters; ++i) {
         auto t0 = Clock::now();
         fi.knnSearch(qmat, idx_out, dst_out, knn, sp);
-        total_search += elapsed_ms(t0);
+        ts += elapsed_ms(t0);
     }
-
-    return { total_build / measure_iters, total_search / measure_iters };
+    return { tb / iters, ts / iters };
 }
 
 // ---------------------------------------------------------------------------
-// Pretty-print
+// Output
 // ---------------------------------------------------------------------------
 
-static void print_header(int dims, int nqueries, int knn, int burn, int iters) {
-    std::cout << "\n=== " << dims << "D  |  "
-              << nqueries << " queries  |  KNN=" << knn
-              << "  |  burn=" << burn << "  |  iters=" << iters << " ===\n\n";
-
-    const int W = 14;
+static void print_header(int dims, int nq, int knn, int burn, int iters) {
+    std::cout << "\n=== " << dims << "D  |  " << nq << " queries  |  KNN=" << knn
+              << "  |  burn=" << burn << "  |  iters=" << iters << " ===\n";
+    std::cout << "  cv-approx = 32 checks (approx)   cv-exact = unlimited checks\n";
+    std::cout << "  p2f/p1: <1 means pico2-float faster than pico1\n";
+    std::cout << "  d/f:    >1 means float faster than double\n\n";
     std::cout << std::left
-        << std::setw(10) << "N"
-        << std::setw(W)  << "pico(ms)"
-        << std::setw(W)  << "cv-approx(ms)"
-        << std::setw(10) << "vs pico"
-        << std::setw(W)  << "cv-exact(ms)"
-        << std::setw(10) << "vs pico"
-        << "\n"
-        << std::string(72, '-') << "\n";
+        << std::setw(8)  << "N"
+        << std::setw(12) << "pico1(ms)"
+        << std::setw(12) << "p2f(ms)"
+        << std::setw(12) << "p2d(ms)"
+        << std::setw(8)  << "p2f/p1"
+        << std::setw(8)  << "d/f"
+        << std::setw(14) << "cv-app(ms)"
+        << std::setw(9)  << "vs p2f"
+        << std::setw(14) << "cv-ex(ms)"
+        << std::setw(9)  << "vs p2f"
+        << "\n" << std::string(106, '-') << "\n";
 }
 
-static void print_subheader(const char* label) {
-    std::cout << " -- " << label << " --\n";
+static void print_subheader(const char* s) {
+    std::cout << " -- " << s << " --\n";
 }
 
 static void print_row(size_t n,
-    double pico, double cv_approx, double cv_exact)
+    double p1, double p2f, double p2d, double app, double ex)
 {
     std::cout << std::left << std::fixed << std::setprecision(2)
-        << std::setw(10) << n
-        << std::setw(14) << pico
-        << std::setw(14) << cv_approx
-        << std::setw(10) << cv_approx / pico
-        << std::setw(14) << cv_exact
-        << std::setw(10) << cv_exact / pico
+        << std::setw(8)  << n
+        << std::setw(12) << p1
+        << std::setw(12) << p2f
+        << std::setw(12) << p2d
+        << std::setw(8)  << p2f / p1
+        << std::setw(8)  << p2d / p2f
+        << std::setw(14) << app
+        << std::setw(9)  << app / p2f
+        << std::setw(14) << ex
+        << std::setw(9)  << ex / p2f
         << "\n";
 }
 
 // ---------------------------------------------------------------------------
-// Run benchmark series
+// Run
 // ---------------------------------------------------------------------------
 
 template<int DIMS>
-void run_benchmark(
-    const std::vector<size_t>& sizes,
-    int nqueries, int knn, int burn, int iters)
+void run_benchmark(const std::vector<size_t>& sizes,
+                   int nq, int knn, int burn, int iters)
 {
-    auto queries = random_points<DIMS>(nqueries, /*seed=*/1234);
-    print_header(DIMS, nqueries, knn, burn, iters);
+    auto queries = random_points<DIMS>(nq, 1234);
+    print_header(DIMS, nq, knn, burn, iters);
 
-    std::vector<BenchResult> rpico, rapprox, rexact;
-
+    std::vector<BenchResult> rp1, rp2f, rp2d, rapp, rex;
     for (size_t n : sizes) {
         auto pts = random_points<DIMS>(n);
-        rpico  .push_back(bench_picoflann<DIMS>(pts, queries, knn, burn, iters));
-        rapprox.push_back(bench_opencv<DIMS>   (pts, queries, knn, burn, iters, 32));
-        rexact .push_back(bench_opencv<DIMS>   (pts, queries, knn, burn, iters, -1));
+        rp1 .push_back(bench_picoflann                        <DIMS>      (pts, queries, knn, burn, iters));
+        rp2f.push_back(bench_picoflann2_scalar<DIMS, float>               (pts, queries, knn, burn, iters));
+        rp2d.push_back(bench_picoflann2_scalar<DIMS, double>              (pts, queries, knn, burn, iters));
+        rapp.push_back(bench_opencv                           <DIMS>      (pts, queries, knn, burn, iters, 32));
+        rex .push_back(bench_opencv                           <DIMS>      (pts, queries, knn, burn, iters, -1));
     }
 
-    print_subheader("BUILD");
+    print_subheader("BUILD   (p2f/p1<1 means pico2-float faster; d/f>1 means float faster)");
     for (size_t i = 0; i < sizes.size(); ++i)
-        print_row(sizes[i], rpico[i].build_ms, rapprox[i].build_ms, rexact[i].build_ms);
+        print_row(sizes[i], rp1[i].build_ms, rp2f[i].build_ms, rp2d[i].build_ms,
+                             rapp[i].build_ms, rex[i].build_ms);
 
     std::cout << "\n";
-    print_subheader("SEARCH  (ratio = cv / pico, higher = picoflann faster)");
+    print_subheader("SEARCH  (vs p2f > 1 means pico2-float faster than opencv)");
     for (size_t i = 0; i < sizes.size(); ++i)
-        print_row(sizes[i], rpico[i].search_ms, rapprox[i].search_ms, rexact[i].search_ms);
+        print_row(sizes[i], rp1[i].search_ms, rp2f[i].search_ms, rp2d[i].search_ms,
+                             rapp[i].search_ms, rex[i].search_ms);
 }
 
 // ---------------------------------------------------------------------------
@@ -238,11 +277,10 @@ int main() {
     const int NQUERIES = 1000;
     const int BURN     = 3;
     const int ITERS    = 5;
-
     const std::vector<size_t> SIZES = { 10000, 50000, 100000, 500000 };
 
-    std::cout << "picoflann (exact) vs OpenCV FLANN approximate (32 checks) and exact (-1 checks)\n";
-    std::cout << "ratio > 1 means picoflann is faster\n";
+    std::cout << "picoflann v1 vs picoflann v2-float vs picoflann v2-double vs OpenCV FLANN\n";
+    std::cout << "p2f/p1 ratio: <1 = pico2-float faster   d/f ratio: >1 = float faster than double\n";
 
     run_benchmark<2>(SIZES, NQUERIES, KNN, BURN, ITERS);
     run_benchmark<3>(SIZES, NQUERIES, KNN, BURN, ITERS);

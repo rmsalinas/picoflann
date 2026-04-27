@@ -25,3 +25,17 @@ target_compile_options(testperformance PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-O3 -march=native>
     $<$<CXX_COMPILER_ID:MSVC>:/O2>
 )
+
+add_executable(test_accuracy test_accuracy.cpp)
+
+target_include_directories(test_accuracy PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${OpenCV_INCLUDE_DIRS}
+)
+
+target_link_libraries(test_accuracy ${OpenCV_LIBS})
+
+target_compile_options(test_accuracy PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-O3 -march=native>
+    $<$<CXX_COMPILER_ID:MSVC>:/O2>
+)
